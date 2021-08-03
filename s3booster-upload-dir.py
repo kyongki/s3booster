@@ -127,7 +127,6 @@ def upload_file(q):
         file_name = mp_data[0] # filename in local
         obj_name = mp_data[1] # object name in S3
         try:
-            time.sleep(1)
             response = bucket.upload_file(file_name, obj_name)
             success_l.info('%s is uploaded' % file_name)
         except ClientError as e:
