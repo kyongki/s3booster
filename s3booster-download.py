@@ -22,11 +22,10 @@ from datetime import datetime
 # variables
 region = 'us-east-2' ## change it with your region
 bucket_name = 'your-own-bucket'
-prefix = 'data1/'
-input_list= [prefix+'dir1/', prefix+'dir2/', prefix+'dir3/']
+prefix_list = ['data1/'] ## 'data1' directory will be created automatically
 local_dir = '/download/here/'
 max_process = 512
-endpoint='https://s3.'+region+'amazonaws.com'
+endpoint='https://s3.'+region+'.amazonaws.com'
 debug_en = False
 # end of variables ## you don't need to modify below codes.
 quit_flag = 'DONE'
@@ -39,15 +38,13 @@ s3 = boto3.resource('s3',endpoint_url=endpoint, region_name=region)
 bucket = s3.Bucket(bucket_name)
 
 # dividing folders by max concurrent processes
-def divide_dirs_list(input_list, max_process):
+def divide_dirs_list(prefix_list, max_process):
     n = max(1, max_process)
-    return (input_list[i:i+n] for i in range(0, len(input_list), n))
+    return (prefix_list[i:i+n] for i in range(0, len(prefix_list), n))
 
 # download function
 
 def get_objs(sub_prefix, q):
-
-
     num_obj=1
     for obj in bucket.objects.filter(Prefix=sub_prefix):
         src_obj = obj.key
@@ -76,7 +73,7 @@ def download_files(q):
         except:
             pass
 
-def run_multip(max_process, download_files, q):
+def run_multip(max_process, exec_func, q):
     p_list = []
     for i in range(max_process):
         p = multiprocessing.Process(target = exec_func, args=(q,))
@@ -109,7 +106,7 @@ def download_dir(s3_dirs):
 if __name__ == '__main__':
     #print("starting script...")
     start_time = datetime.now()
-    s3_dirs = input_list
+    s3_dirs = prefix_list
     total_files = download_dir(s3_dirs)
     end_time = datetime.now()
     print('=============================================')
