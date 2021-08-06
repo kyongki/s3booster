@@ -47,6 +47,7 @@ import tarfile
 #Below prefix will download from /data/fs1/* on filesystem to fs1/* on S3
 prefix_list = ['/data/fs1/']  ## Don't forget to add last slash '/'
 prefix_root = 'fs1/' ## Don't forget to add last slash '/'
+#prefix_root = '' ## This is for the all files and directories under /data/fs1/
 ##Common Variables
 bucket_name = 'your-own-bucket'
 profile_name = 'sbe1'
