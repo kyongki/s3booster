@@ -92,6 +92,11 @@ def setup_logger(logger_name, log_file, level=logging.INFO):
     l.setLevel(level)
     l.addHandler(fileHandler)
     #l.addHandler(streamHandler)
+## define logger
+setup_logger('error', errorlog_file, level=log_level)
+setup_logger('success', successlog_file, level=log_level)
+error_log = logging.getLogger('error')
+success_log = logging.getLogger('success')
 
 ## code from snowball_uploader
 def create_mpu(key_name):
@@ -280,11 +285,6 @@ if __name__ == '__main__':
     try:
         os.makedirs('log')
     except: pass
-    ## define logger
-    setup_logger('error', errorlog_file, level=log_level)
-    setup_logger('success', successlog_file, level=log_level)
-    error_log = logging.getLogger('error')
-    success_log = logging.getLogger('success')
     
     #print("starting script...")
     start_time = datetime.now()
