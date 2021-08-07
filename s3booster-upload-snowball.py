@@ -133,6 +133,7 @@ def buf_fifo(buf):
     return buf
 
 def copy_to_snowball(tar_name, org_files_list):
+    delimeter = ' ,'
     tar_file_size = 0
     recv_buf = io.BytesIO()
     mpu_id = create_mpu(tar_name)
@@ -143,7 +144,7 @@ def copy_to_snowball(tar_name, org_files_list):
             if os.path.isfile(file_name):
                 tar.add(file_name, arcname=obj_name)
                 #success_log.debug('1. recv_buf_size: %s' % len(recv_buf.getvalue()))
-                success_log.info(file_name + '  ,' + str(file_size)) #kyongki
+                success_log.info(file_name + delimeter + obj_name + delimeter + str(file_size)) #kyongki
                 recv_buf_size = recv_buf.tell()
                 #success_log.debug('1. recv_buf_pos: %s' % recv_buf.tell())
                 if recv_buf_size > max_part_size:
@@ -232,8 +233,7 @@ def upload_get_files(sub_prefix, q):
             num_obj+=1
             #time.sleep(0.1)
     try:
-        #mp_data = [org_files_list, tar_name]
-        mp_data = org_files_list #kyongki
+        mp_data = org_files_list
         q.put(mp_data)
         success_log.debug('1, sending mp_data size: %s'% len(mp_data))
         success_log.debug('1, sending mp_data: %s'% mp_data)
