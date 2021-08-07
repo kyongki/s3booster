@@ -43,10 +43,10 @@ import io
 import tarfile
 
 #region = 'us-east-2' ## change it with your region
-#Below prefix will download from /data/fs1/* on filesystem to fs1/* on S3
-prefix_list = ['/data/fs1/']  ## Don't forget to add last slash '/'
-prefix_root = 'fs1/' ## Don't forget to add last slash '/'
-#prefix_root = '' ## This is for the all files and directories under /data/fs1/
+#Below prefix will download from /data/dir1/* on filesystem to fs1/* on S3
+prefix_list = ['/data/dir1/']  ## Don't forget to add last slash '/'
+prefix_root = 'dir1/' ## Don't forget to add last slash '/'
+#prefix_root = '' ## This is for the all files and directories under /data/dir1/
 ##Common Variables
 bucket_name = 'your-own-bucket'
 profile_name = 'sbe1'
@@ -60,14 +60,14 @@ log_level = logging.INFO ## DEBUG, INFO, WARNING, ERROR
 ## begin of snowball_uploader variables
 s3_client_class = 'STANDARD' ## value is fixed, snowball only transferred to STANDARD class
 max_tarfile_size = 10 * (1024 ** 3) # 10GiB, 100GiB is max limit of snowball
-max_part_size = 300 * (1024 ** 2) # 300MB, 500MiB is max limit of snowball
+max_part_size = 300 * (1024 ** 2) # 100MB, 500MiB is max limit of snowball
 min_part_size = 5 * 1024 ** 2 # 16MiB for S3, 5MiB for SnowballEdge
 max_part_count = int(math.ceil(max_tarfile_size / max_part_size))
 current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
 # CMD variables
 cmd='upload_dir' ## supported_cmd: 'download|del_obj_version|restore_obj_version'
-errorlog_file = 'log/error-%s.log' % current_time
-successlog_file = 'log/success-%s.log' % current_time
+errorlog_file = 'log/error.log' 
+successlog_file = 'log/success.log'
 quit_flag = 'DONE'
 # End of Variables
 
@@ -91,6 +91,11 @@ def setup_logger(logger_name, log_file, level=logging.INFO):
     l.setLevel(level)
     l.addHandler(fileHandler)
     #l.addHandler(streamHandler)
+## define logger
+setup_logger('error', errorlog_file, level=log_level)
+setup_logger('success', successlog_file, level=log_level)
+error_log = logging.getLogger('error')
+success_log = logging.getLogger('success')
 
 ## code from snowball_uploader
 def create_mpu(key_name):
@@ -127,7 +132,7 @@ def buf_fifo(buf):
     buf.write(tmp_buf.read())
     return buf
 
-def copy_to_snowball(tar_name, org_files_list, success_log, error_log):
+def copy_to_snowball(tar_name, org_files_list):
     delimeter = ' ,'
     tar_file_size = 0
     recv_buf = io.BytesIO()
@@ -180,10 +185,10 @@ def gen_rand_char():
     char_set = string.ascii_uppercase + string.digits
     return (''.join(random.sample(char_set*6, 6)))
 # execute multiprocessing
-def run_multip(max_process, exec_func, q, success_log, error_log):
+def run_multip(max_process, exec_func, q):
     p_list = []
     for i in range(max_process):
-        p = multiprocessing.Process(target = exec_func, args=(success_log, error_log, q,))
+        p = multiprocessing.Process(target = exec_func, args=(q,))
         p_list.append(p)
         p.daemon = True
         p.start()
@@ -196,7 +201,7 @@ def finishq(q, p_list):
         pi.join()
 
 # get files to upload
-def upload_get_files(sub_prefix, q, success_log, error_log):
+def upload_get_files(sub_prefix, q):
     num_obj=0
     sum_size = 0
     org_files_list = []
@@ -220,7 +225,7 @@ def upload_get_files(sub_prefix, q, success_log, error_log):
                     mp_data = org_files_list
                     org_files_list = []
                     try:
-                        # put files following max_tarfile_size into queue
+                        # put files into queue in max_tarfile_size
                         q.put(mp_data)
                         success_log.debug('0, sending mp_data size: %s'% len(mp_data))
                         success_log.debug('0, sending mp_data: %s'% mp_data)
@@ -228,10 +233,10 @@ def upload_get_files(sub_prefix, q, success_log, error_log):
                         error_log.info('exception error: putting %s into queue is failed' % file_name)
                         error_log.info(e)
                 num_obj+=1
-                #time.sleep(0.1)
             except Exception as e:
                 error_log.info('exception error: getting %s file info is failed' % file_name)
                 error_log.info(e)
+            #time.sleep(0.1)
     try:
         # put remained files into queue
         mp_data = org_files_list
@@ -244,7 +249,7 @@ def upload_get_files(sub_prefix, q, success_log, error_log):
     q.put(quit_flag)
     return num_obj
 
-def upload_file(q, success_log, error_log):
+def upload_file(q):
     while True:
         mp_data = q.get()
         org_files_list = mp_data
@@ -255,20 +260,20 @@ def upload_file(q, success_log, error_log):
         if mp_data == quit_flag:
             break
         try:
-            copy_to_snowball(tar_name, org_files_list, success_log, error_log)
+            copy_to_snowball(tar_name, org_files_list)
             #print('%s is uploaded' % tar_name)
         except Exception as e:
             error_log.info('exception error: %s uploading failed' % tar_name)
             error_log.info(e)
         #return 0 ## for the dubug, it will pause with error
         
-def upload_file_multi(s3_dirs, success_log, error_log):
+def upload_file_multi(s3_dirs):
     total_obj = 0
     for s3_dir in s3_dirs:
         success_log.info('%s directory is uploading' % s3_dir)
-        p_list = run_multip(max_process, upload_file, q, success_log, error_log)
+        p_list = run_multip(max_process, upload_file, q)
         # get object list and ingest to processes
-        num_obj = upload_get_files(s3_dir, q, success_log, error_log)
+        num_obj = upload_get_files(s3_dir, q)
         # sending quit_flag and join processes
         finishq(q, p_list) 
         success_log.info('%s directory is uploaded' % s3_dir)
@@ -285,16 +290,12 @@ if __name__ == '__main__':
     try:
         os.makedirs('log')
     except: pass
-    ## define logger
-    setup_logger('error', errorlog_file, level=log_level)
-    setup_logger('success', successlog_file, level=log_level)
-    error_log = logging.getLogger('error')
-    success_log = logging.getLogger('success')
+    
     #print("starting script...")
     start_time = datetime.now()
     s3_dirs = prefix_list
     if cmd == 'upload_dir':
-        total_files = upload_file_multi(s3_dirs, error_log, success_log)
+        total_files = upload_file_multi(s3_dirs)
     else:
         s3_booster_help
 
@@ -304,6 +305,6 @@ if __name__ == '__main__':
     #    stored_dir = local_dir + d
     #    print("[Information] Download completed, data stored in %s" % stored_dir)
     print('Duration: {}'.format(end_time - start_time))
-    print('Total File numbers: %d' % total_files) 
+    print('Total File numbers: %d' % total_files) #kyongki
     print('S3 Endpoint: %s' % endpoint)
     print('End')
