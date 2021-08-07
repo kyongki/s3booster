@@ -1,6 +1,5 @@
 #!/bin/env python3
 '''
-** Chaveat: not suitable for millions of files, it shows slow performance to get object list
 ChangeLogs
 - 2021.08.05:
   - this utility will copy files from local filesystem to SnowballEdge in parallel  
