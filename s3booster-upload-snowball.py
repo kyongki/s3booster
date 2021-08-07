@@ -127,7 +127,7 @@ def buf_fifo(buf):
     buf.write(tmp_buf.read())
     return buf
 
-def copy_to_snowball(tar_name, org_files_list):
+def copy_to_snowball(tar_name, org_files_list, success_log, error_log):
     delimeter = ' ,'
     tar_file_size = 0
     recv_buf = io.BytesIO()
@@ -180,10 +180,10 @@ def gen_rand_char():
     char_set = string.ascii_uppercase + string.digits
     return (''.join(random.sample(char_set*6, 6)))
 # execute multiprocessing
-def run_multip(max_process, exec_func, q):
+def run_multip(max_process, exec_func, q, success_log, error_log):
     p_list = []
     for i in range(max_process):
-        p = multiprocessing.Process(target = exec_func, args=(q,))
+        p = multiprocessing.Process(target = exec_func, args=(success_log, error_log, q,))
         p_list.append(p)
         p.daemon = True
         p.start()
@@ -196,7 +196,7 @@ def finishq(q, p_list):
         pi.join()
 
 # get files to upload
-def upload_get_files(sub_prefix, q):
+def upload_get_files(sub_prefix, q, success_log, error_log):
     num_obj=0
     sum_size = 0
     org_files_list = []
@@ -244,7 +244,7 @@ def upload_get_files(sub_prefix, q):
     q.put(quit_flag)
     return num_obj
 
-def upload_file(q):
+def upload_file(q, success_log, error_log):
     while True:
         mp_data = q.get()
         org_files_list = mp_data
@@ -255,20 +255,20 @@ def upload_file(q):
         if mp_data == quit_flag:
             break
         try:
-            copy_to_snowball(tar_name, org_files_list)
+            copy_to_snowball(tar_name, org_files_list, success_log, error_log)
             #print('%s is uploaded' % tar_name)
         except Exception as e:
             error_log.info('exception error: %s uploading failed' % tar_name)
             error_log.info(e)
         #return 0 ## for the dubug, it will pause with error
         
-def upload_file_multi(s3_dirs):
+def upload_file_multi(s3_dirs, success_log, error_log):
     total_obj = 0
     for s3_dir in s3_dirs:
         success_log.info('%s directory is uploading' % s3_dir)
-        p_list = run_multip(max_process, upload_file, q)
+        p_list = run_multip(max_process, upload_file, q, success_log, error_log)
         # get object list and ingest to processes
-        num_obj = upload_get_files(s3_dir, q)
+        num_obj = upload_get_files(s3_dir, q, success_log, error_log)
         # sending quit_flag and join processes
         finishq(q, p_list) 
         success_log.info('%s directory is uploaded' % s3_dir)
@@ -294,7 +294,7 @@ if __name__ == '__main__':
     start_time = datetime.now()
     s3_dirs = prefix_list
     if cmd == 'upload_dir':
-        total_files = upload_file_multi(s3_dirs)
+        total_files = upload_file_multi(s3_dirs, error_log, success_log)
     else:
         s3_booster_help
 
@@ -304,6 +304,6 @@ if __name__ == '__main__':
     #    stored_dir = local_dir + d
     #    print("[Information] Download completed, data stored in %s" % stored_dir)
     print('Duration: {}'.format(end_time - start_time))
-    print('Total File numbers: %d' % total_files) #kyongki
+    print('Total File numbers: %d' % total_files) 
     print('S3 Endpoint: %s' % endpoint)
     print('End')
