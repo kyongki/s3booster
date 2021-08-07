@@ -254,7 +254,7 @@ def upload_file(q):
         mp_data = q.get()
         org_files_list = mp_data
         randchar = str(gen_rand_char())
-        tar_name = ('snowball-%s-%s.tar' % (randchar, current_time))
+        tar_name = ('snowball-%s-%s.tar' % (current_time, randchar))
         success_log.debug('receving mp_data size: %s'% len(org_files_list))
         success_log.debug('receving mp_data: %s'% org_files_list)
         if mp_data == quit_flag:
