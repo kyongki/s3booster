@@ -24,7 +24,7 @@ ChangeLogs
 #requirement
 ## python 3.7+ (os.name)
 ## boto3
-## preferred os: linux (mac, windows works as well, but performance is slower)
+## preferred os: linux (Windows works as well, but performance is slower)
 
 import os
 import boto3
@@ -60,7 +60,7 @@ log_level = logging.INFO ## DEBUG, INFO, WARNING, ERROR
 ## begin of snowball_uploader variables
 s3_client_class = 'STANDARD' ## value is fixed, snowball only transferred to STANDARD class
 max_tarfile_size = 10 * (1024 ** 3) # 10GiB, 100GiB is max limit of snowball
-max_part_size = 100 * (1024 ** 2) # 100MB, 500MiB is max limit of snowball
+max_part_size = 300 * (1024 ** 2) # 300MB, 500MiB is max limit of snowball
 min_part_size = 5 * 1024 ** 2 # 16MiB for S3, 5MiB for SnowballEdge
 max_part_count = int(math.ceil(max_tarfile_size / max_part_size))
 current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -91,11 +91,6 @@ def setup_logger(logger_name, log_file, level=logging.INFO):
     l.setLevel(level)
     l.addHandler(fileHandler)
     #l.addHandler(streamHandler)
-## define logger
-setup_logger('error', errorlog_file, level=log_level)
-setup_logger('success', successlog_file, level=log_level)
-error_log = logging.getLogger('error')
-success_log = logging.getLogger('success')
 
 ## code from snowball_uploader
 def create_mpu(key_name):
@@ -208,37 +203,43 @@ def upload_get_files(sub_prefix, q):
    # get all files from given directory
     for r,d,f in os.walk(sub_prefix):
         for file in f:
-            file_name = os.path.join(r,file)
-            # support compatibility of MAC and windows
-            file_name = unicodedata.normalize('NFC', file_name)
-            if os.name == 'nt':
-                obj_name = prefix_root + file_name.replace(sub_prefix,'',1).replace('\\', '/')
-            else:
-                obj_name = prefix_root + file_name.replace(sub_prefix,'',1)
-            f_size = os.stat(file_name).st_size                
-            file_info = (file_name, obj_name, f_size)
-            org_files_list.append(file_info)
-            sum_size = sum_size + f_size
-            if max_tarfile_size < sum_size:
-                sum_size = 0
-                mp_data = org_files_list
-                org_files_list = []
-                try:
-                    q.put(mp_data)
-                    success_log.debug('0, sending mp_data size: %s'% len(mp_data))
-                    success_log.debug('0, sending mp_data: %s'% mp_data)
-                except Exception as e:
-                    error_log.info('exception error: putting %s into queue %s is failed' % file_name)
-                    error_log.info(e)
-            num_obj+=1
-            #time.sleep(0.1)
+            try:
+                file_name = os.path.join(r,file)
+                # support compatibility of MAC and windows
+                file_name = unicodedata.normalize('NFC', file_name)
+                if os.name == 'nt':
+                    obj_name = prefix_root + file_name.replace(sub_prefix,'',1).replace('\\', '/')
+                else:
+                    obj_name = prefix_root + file_name.replace(sub_prefix,'',1)
+                f_size = os.stat(file_name).st_size                
+                file_info = (file_name, obj_name, f_size)
+                org_files_list.append(file_info)
+                sum_size = sum_size + f_size
+                if max_tarfile_size < sum_size:
+                    sum_size = 0
+                    mp_data = org_files_list
+                    org_files_list = []
+                    try:
+                        # put files following max_tarfile_size into queue
+                        q.put(mp_data)
+                        success_log.debug('0, sending mp_data size: %s'% len(mp_data))
+                        success_log.debug('0, sending mp_data: %s'% mp_data)
+                    except Exception as e:
+                        error_log.info('exception error: putting %s into queue is failed' % file_name)
+                        error_log.info(e)
+                num_obj+=1
+                #time.sleep(0.1)
+            except Exception as e:
+                error_log.info('exception error: getting %s file info is failed' % file_name)
+                error_log.info(e)
     try:
+        # put remained files into queue
         mp_data = org_files_list
         q.put(mp_data)
         success_log.debug('1, sending mp_data size: %s'% len(mp_data))
         success_log.debug('1, sending mp_data: %s'% mp_data)
     except Exception as e:
-        error_log.info('exception error: putting %s into queue %s is failed' % file_name)
+        error_log.info('exception error: putting %s into queue is failed' % file_name)
         error_log.info(e)
     q.put(quit_flag)
     return num_obj
@@ -284,7 +285,11 @@ if __name__ == '__main__':
     try:
         os.makedirs('log')
     except: pass
-    
+    ## define logger
+    setup_logger('error', errorlog_file, level=log_level)
+    setup_logger('success', successlog_file, level=log_level)
+    error_log = logging.getLogger('error')
+    success_log = logging.getLogger('success')
     #print("starting script...")
     start_time = datetime.now()
     s3_dirs = prefix_list
