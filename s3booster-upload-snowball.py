@@ -1,6 +1,8 @@
 #!/bin/env python3
 '''
 ChangeLogs
+- 2021.08.09:
+  - error handling, when tar can't archive a file with 'permission denied' error'
 - 2021.08.05:
   - this utility will copy files from local filesystem to SnowballEdge in parallel  
   - snowball_uploader alternative
@@ -41,11 +43,12 @@ import string
 import math
 import io
 import tarfile
+import traceback
 
 #region = 'us-east-2' ## change it with your region
 #Below prefix will download from /data/dir1/* on filesystem to fs1/* on S3
-prefix_list = ['/data/dir1/']  ## Don't forget to add last slash '/'
-prefix_root = 'dir1/' ## Don't forget to add last slash '/'
+prefix_list = ['/data/fs1/']  ## Don't forget to add last slash '/'
+prefix_root = 'fs1/' ## Don't forget to add last slash '/'
 #prefix_root = '' ## This is for the all files and directories under /data/dir1/
 ##Common Variables
 bucket_name = 'your-own-bucket'
@@ -59,15 +62,16 @@ log_level = logging.INFO ## DEBUG, INFO, WARNING, ERROR
 ##### Optional variables
 ## begin of snowball_uploader variables
 s3_client_class = 'STANDARD' ## value is fixed, snowball only transferred to STANDARD class
-max_tarfile_size = 10 * (1024 ** 3) # 10GiB, 100GiB is max limit of snowball
+max_tarfile_size = 1 * (1024 ** 3) # 10GiB, 100GiB is max limit of snowball
 max_part_size = 300 * (1024 ** 2) # 100MB, 500MiB is max limit of snowball
 min_part_size = 5 * 1024 ** 2 # 16MiB for S3, 5MiB for SnowballEdge
 max_part_count = int(math.ceil(max_tarfile_size / max_part_size))
 current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
 # CMD variables
 cmd='upload_dir' ## supported_cmd: 'download|del_obj_version|restore_obj_version'
-errorlog_file = 'log/error.log' 
-successlog_file = 'log/success.log'
+errorlog_file = 'log/error-%s.log' % current_time
+successlog_file = 'log/success-%s.log' % current_time
+filelist_file = 'log/filelist-%s.log' % current_time
 quit_flag = 'DONE'
 # End of Variables
 
@@ -84,18 +88,21 @@ s3_client = session.client('s3', endpoint_url=endpoint)
 def setup_logger(logger_name, log_file, level=logging.INFO):
     l = logging.getLogger(logger_name)
     formatter = logging.Formatter('%(message)s')
-    fileHandler = logging.FileHandler(log_file, mode='w', encoding='utf-8')
+    fileHandler = logging.FileHandler(log_file, mode='a', encoding='utf-8')
     fileHandler.setFormatter(formatter)
     streamHandler = logging.StreamHandler()
     streamHandler.setFormatter(formatter)
     l.setLevel(level)
     l.addHandler(fileHandler)
     #l.addHandler(streamHandler)
+
 ## define logger
 setup_logger('error', errorlog_file, level=log_level)
 setup_logger('success', successlog_file, level=log_level)
+setup_logger('filelist', filelist_file, level=log_level)
 error_log = logging.getLogger('error')
 success_log = logging.getLogger('success')
+filelist_log = logging.getLogger('filelist')
 
 ## code from snowball_uploader
 def create_mpu(key_name):
@@ -139,32 +146,37 @@ def copy_to_snowball(tar_name, org_files_list):
     mpu_id = create_mpu(tar_name)
     parts_index = 1
     parts = []
+    collected_files_no = 0
     with tarfile.open(fileobj=recv_buf, mode="w") as tar:
         for file_name, obj_name, file_size in org_files_list:
             if os.path.isfile(file_name):
-                tar.add(file_name, arcname=obj_name)
-                #success_log.debug('1. recv_buf_size: %s' % len(recv_buf.getvalue()))
-                success_log.info(file_name + delimeter + obj_name + delimeter + str(file_size)) #kyongki
-                recv_buf_size = recv_buf.tell()
-                #success_log.debug('1. recv_buf_pos: %s' % recv_buf.tell())
-                if recv_buf_size > max_part_size:
-                    print('multi part uploading:  %s / %s , size: %s bytes' % (parts_index, max_part_count, recv_buf_size))
-                    chunk_count = int(recv_buf_size / max_part_size)
-                    tar_file_size = tar_file_size + recv_buf_size
-                    #print('%s is accumulating, size: %s byte' % (tar_name, tar_file_size))
-                    for buf_index in range(chunk_count):
-                        start_pos = buf_index * max_part_size
-                        recv_buf.seek(start_pos,0)
-                        mpu_parts = upload_mpu(tar_name, mpu_id, recv_buf.read(max_part_size), parts_index, parts)
-                        parts_index += 1
-                    ####################
-                    buf_fifo(recv_buf)
+                try:
+                    tar.add(file_name, arcname=obj_name)
+                    collected_files_no += 1
+                    #success_log.debug('1. recv_buf_size: %s' % len(recv_buf.getvalue()))
+                    filelist_log.info(file_name + delimeter + obj_name + delimeter + str(file_size)) #kyongki
                     recv_buf_size = recv_buf.tell()
-                    #print('3.after fifo, recv_buf_pos : %s' % recv_buf.tell())
-                    #print ('3. after fifo, recv_buf_size: %s' % len(recv_buf.getvalue()))
-                else:
-                    pass
-                    #print('accumulating files...')
+                    #success_log.debug('1. recv_buf_pos: %s' % recv_buf.tell())
+                    if recv_buf_size > max_part_size:
+                        print('multi part uploading:  %s / %s , size: %s bytes' % (parts_index, max_part_count, recv_buf_size))
+                        chunk_count = int(recv_buf_size / max_part_size)
+                        tar_file_size = tar_file_size + recv_buf_size
+                        #print('%s is accumulating, size: %s byte' % (tar_name, tar_file_size))
+                        for buf_index in range(chunk_count):
+                            start_pos = buf_index * max_part_size
+                            recv_buf.seek(start_pos,0)
+                            mpu_parts = upload_mpu(tar_name, mpu_id, recv_buf.read(max_part_size), parts_index, parts)
+                            parts_index += 1
+                        ####################
+                        buf_fifo(recv_buf)
+                        recv_buf_size = recv_buf.tell()
+                        #print('3.after fifo, recv_buf_pos : %s' % recv_buf.tell())
+                        #print ('3. after fifo, recv_buf_size: %s' % len(recv_buf.getvalue()))
+                    else:
+                        pass
+                        #print('accumulating files...')
+                except IOError:
+                    error_log.info("%s is ignored" % file_name) 
             else:
                 error_log.info(file_name,' does not exist\n')
                 print (file_name + ' is not exist...............................................\n')
@@ -176,8 +188,10 @@ def copy_to_snowball(tar_name, org_files_list):
     ### print metadata
     meta_out = s3_client.head_object(Bucket=bucket_name, Key=tar_name)
     print('metadata info: %s\n' % str(meta_out))
-    #print ('\n tar file: %s \n' % tar_name)
     print('%s is uploaded successfully\n' % tar_name)
+    success_log.debug('metadata info: %s' % str(meta_out))
+    success_log.info('%s uploaded successfully' % tar_name)
+    return collected_files_no
 ## end of code from snowball_uploader
 
 # generate random 6 character
@@ -246,7 +260,6 @@ def upload_get_files(sub_prefix, q):
     except Exception as e:
         error_log.info('exception error: putting %s into queue is failed' % file_name)
         error_log.info(e)
-    q.put(quit_flag)
     return num_obj
 
 def upload_file(q):
@@ -265,6 +278,7 @@ def upload_file(q):
         except Exception as e:
             error_log.info('exception error: %s uploading failed' % tar_name)
             error_log.info(e)
+            traceback.print_exc()
         #return 0 ## for the dubug, it will pause with error
         
 def upload_file_multi(s3_dirs):
@@ -284,6 +298,7 @@ def s3_booster_help():
     print("example: python3 s3booster_upload.py")
 # start main function
 if __name__ == '__main__':
+
     # define simple queue
     q = multiprocessing.Queue()
     # create log directory

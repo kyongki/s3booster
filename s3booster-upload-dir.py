@@ -114,7 +114,6 @@ def upload_get_files(sub_prefix, q):
                 error_l.info(e)
             num_obj+=1
             #time.sleep(0.1)
-    q.put(quit_flag)
     #q.close()
     #q.join_thread()
     return num_obj

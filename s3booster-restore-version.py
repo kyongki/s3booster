@@ -80,7 +80,6 @@ def restore_get_obj_delmarker(sub_prefix, q):
                 num_obj+=1
         else:
             print('no delmarker')
-    q.put(quit_flag)
     return num_obj
 
 def restore_obj_version(q):
