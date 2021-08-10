@@ -9,23 +9,21 @@ python3 s3booster-upload-snowball.py --bucket_name your-own-bucket --src_dir /da
 
 Here is help 
 ```sh
-s3booster]$ python3 s3booster-upload-snowball-20210810-test.py -h
-usage: s3booster-upload-snowball-20210810-test.py [-h] --bucket_name
-                                                  BUCKET_NAME --src_dir
-                                                  SRC_DIR [--region REGION]
-                                                  --endpoint ENDPOINT
-                                                  [--profile_name PROFILE_NAME]
-                                                  [--prefix_root PREFIX_ROOT]
-                                                  [--max_process MAX_PROCESS]
-                                                  [--max_tarfile_size MAX_TARFILE_SIZE]
-                                                  [--max_part_size MAX_PART_SIZE]
+s3booster]$ python3 s3booster-upload-snowball.py -h
+usage: s3booster-upload-snowball.py [-h] --bucket_name BUCKET_NAME 
+                                         --src_dir SRC_DIR 
+                                         --endpoint ENDPOINT
+                                         [--profile_name PROFILE_NAME]
+                                         [--prefix_root PREFIX_ROOT]
+                                         [--max_process MAX_PROCESS]
+                                         [--max_tarfile_size MAX_TARFILE_SIZE]
+                                         [--max_part_size MAX_PART_SIZE]
 
 optional arguments:
   -h, --help            show this help message and exit
   --bucket_name BUCKET_NAME
                         your bucket name e) your-bucket
   --src_dir SRC_DIR     source directory e) /data/dir1/
-  --region REGION       aws_region e) ap-northeast-2
   --endpoint ENDPOINT   snowball endpoint e) http://10.10.10.10:8080 or
                         https://s3.ap-northeast-2.amazonaws.com
   --profile_name PROFILE_NAME
@@ -70,4 +68,8 @@ Total File numbers: 503004
 S3 Endpoint: https://s3.ap-northeast-2.amazonaws.com
 End
 ```
-
+## Checking the logs
+Log Directory: ./log/
+- error-{date}.log : each file of failed to tar will be logged here
+- success-{date}.log: success message will be logged here
+- filelist-{date}.log: all files which are archived will be logged here
