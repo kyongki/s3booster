@@ -1,6 +1,8 @@
 #!/bin/env python3
 '''
 ChangeLogs
+- 2021.08.11:
+  - adding compression argument and adjusting suffix "tgz"
 - 2021.08.10:
   - check source directory exist
   - handling argument with argparse
@@ -60,6 +62,7 @@ parser.add_argument('--prefix_root', help='prefix root e) dir1/', action='store'
 parser.add_argument('--max_process', help='NUM e) 5', action='store', default=5, type=int) 
 parser.add_argument('--max_tarfile_size', help='NUM bytes e) $((1*(1024**3))) #1GB for < total 50GB, 10GB for >total 50GB', action='store', default=10*(1024**3), type=int)
 parser.add_argument('--max_part_size', help='NUM bytes e) $((100*(1024**2))) #100MB', action='store', default=100*(1024**2), type=int)
+parser.add_argument('--compression', help='specify gz to enable', action='store', default='')
 args = parser.parse_args()
 
 prefix_list = args.src_dir  ## Don't forget to add last slash '/'
@@ -71,6 +74,7 @@ endpoint = args.endpoint
 max_process = args.max_process
 max_tarfile_size = args.max_tarfile_size # 10GiB, 100GiB is max limit of snowball
 max_part_size = args.max_part_size  # 100MB, 500MiB is max limit of snowball
+compression = args.compression # default for no compression, "gz" to enable
 log_level = logging.INFO ## DEBUG, INFO, WARNING, ERROR
 # end of user variables ## you don't need to modify below codes.
 ##### Optional variables
@@ -127,7 +131,6 @@ def create_mpu(key_name):
     return mpu_id
 
 def upload_mpu(key_name, mpu_id, data, index, parts):
-    #part = s3_client.upload_part(Body=data, Bucket=bucket_name, Key=key_name, UploadId=mpu_id, PartNumber=index, ContentLength=max_buf_size)
     part = s3_client.upload_part(Body=data, Bucket=bucket_name, Key=key_name, UploadId=mpu_id, PartNumber=index)
     parts.append({"PartNumber": index, "ETag": part["ETag"]})
     success_log.debug('parts list: %s' % str(parts))
@@ -163,14 +166,15 @@ def copy_to_snowball(tar_name, org_files_list):
     parts_index = 1
     parts = []
     collected_files_no = 0
-    with tarfile.open(fileobj=recv_buf, mode="w:gz") as tar:
+    with tarfile.open(fileobj=recv_buf, mode='w:'+compression) as tar:
+    #with tarfile.open(fileobj=recv_buf, mode='w:'+compression, compresslevel=1) as tar:
         for file_name, obj_name, file_size in org_files_list:
             if os.path.isfile(file_name):
                 try:
                     tar.add(file_name, arcname=obj_name)
                     collected_files_no += 1
                     #success_log.debug('1. recv_buf_size: %s' % len(recv_buf.getvalue()))
-                    filelist_log.info(file_name + delimeter + obj_name + delimeter + str(file_size)) #kyongki
+                    filelist_log.debug(file_name + delimeter + obj_name + delimeter + str(file_size)) #kyongki
                     recv_buf_size = recv_buf.tell()
                     #success_log.debug('1. recv_buf_pos: %s' % recv_buf.tell())
                     if recv_buf_size > max_part_size:
@@ -288,7 +292,10 @@ def upload_file(q):
         mp_data = q.get()
         org_files_list = mp_data
         randchar = str(gen_rand_char())
-        tar_name = ('snowball-%s-%s.tgz' % (current_time, randchar))
+        if compression == '': 
+            tar_name = ('snowball-%s-%s.tar' % (current_time, randchar))
+        elif compression == 'gz':
+            tar_name = ('snowball-%s-%s.tgz' % (current_time, randchar))
         success_log.debug('receving mp_data size: %s'% len(org_files_list))
         success_log.debug('receving mp_data: %s'% org_files_list)
         if mp_data == quit_flag:
