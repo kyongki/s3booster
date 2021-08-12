@@ -1,8 +1,12 @@
 #!/bin/env python3
 '''
 ChangeLogs
+- 2021.08.12:
+  - using s3client.upload_fileobj instead of mpu_upload
+  - improve upload performance, but more memory usage
 - 2021.08.11:
   - adding compression argument and adjusting suffix "tgz"
+  - compression feature is added by "Kirill Davydychev", Thanks Kirill
 - 2021.08.10:
   - check source directory exist
   - handling argument with argparse
@@ -114,7 +118,7 @@ def setup_logger(logger_name, log_file, level=logging.INFO):
     streamHandler.setFormatter(formatter)
     l.setLevel(level)
     l.addHandler(fileHandler)
-    #l.addHandler(streamHandler)
+    l.addHandler(streamHandler)
 
 ## define logger
 setup_logger('error', errorlog_file, level=log_level)
@@ -125,92 +129,30 @@ success_log = logging.getLogger('success')
 filelist_log = logging.getLogger('filelist')
 
 ## code from snowball_uploader
-def create_mpu(key_name):
-    mpu = s3_client.create_multipart_upload(Bucket=bucket_name, Key=key_name, StorageClass=s3_client_class, Metadata={"snowball-auto-extract": "true"})
-    mpu_id = mpu["UploadId"]
-    return mpu_id
-
-def upload_mpu(key_name, mpu_id, data, index, parts):
-    part = s3_client.upload_part(Body=data, Bucket=bucket_name, Key=key_name, UploadId=mpu_id, PartNumber=index)
-    parts.append({"PartNumber": index, "ETag": part["ETag"]})
-    success_log.debug('parts list: %s' % str(parts))
-    return parts
-
-def complete_mpu(key_name, mpu_id, parts):
-    result = s3_client.complete_multipart_upload(
-        Bucket=bucket_name,
-        Key=key_name,
-        UploadId=mpu_id,
-        MultipartUpload={"Parts": parts})
-    return result
-
-def adjusting_parts_order(mpu_parts):
-    return sorted(mpu_parts, key=lambda item: item['PartNumber'])
-
-def buf_fifo(buf):
-    tmp_buf = io.BytesIO()            # added for FIFO operation
-    tmp_buf.write(buf.read())    # added for FIFO operation
-    #print ('3. before fifo, recv_buf_size: %s' % len(buf.getvalue()))
-    #print('3.before fifo, recv_buf_pos : %s' % buf.tell())
-    buf.seek(0,0)
-    buf.truncate(0)
-    tmp_buf.seek(0,0)
-    buf.write(tmp_buf.read())
-    return buf
-
 def copy_to_snowball(tar_name, org_files_list):
     delimeter = ' ,'
     tar_file_size = 0
     recv_buf = io.BytesIO()
-    mpu_id = create_mpu(tar_name)
-    parts_index = 1
-    parts = []
     collected_files_no = 0
+    success_log.info('%s is archiving',tar_name)
     with tarfile.open(fileobj=recv_buf, mode='w:'+compression) as tar:
     #with tarfile.open(fileobj=recv_buf, mode='w:'+compression, compresslevel=1) as tar:
         for file_name, obj_name, file_size in org_files_list:
-            if os.path.isfile(file_name):
-                try:
-                    tar.add(file_name, arcname=obj_name)
-                    collected_files_no += 1
-                    #success_log.debug('1. recv_buf_size: %s' % len(recv_buf.getvalue()))
-                    filelist_log.debug(file_name + delimeter + obj_name + delimeter + str(file_size)) #kyongki
-                    recv_buf_size = recv_buf.tell()
-                    #success_log.debug('1. recv_buf_pos: %s' % recv_buf.tell())
-                    if recv_buf_size > max_part_size:
-                        print('multi part uploading:  %s / %s , size: %s bytes' % (parts_index, max_part_count, recv_buf_size))
-                        chunk_count = int(recv_buf_size / max_part_size)
-                        tar_file_size = tar_file_size + recv_buf_size
-                        #print('%s is accumulating, size: %s byte' % (tar_name, tar_file_size))
-                        for buf_index in range(chunk_count):
-                            start_pos = buf_index * max_part_size
-                            recv_buf.seek(start_pos,0)
-                            mpu_parts = upload_mpu(tar_name, mpu_id, recv_buf.read(max_part_size), parts_index, parts)
-                            parts_index += 1
-                        ####################
-                        buf_fifo(recv_buf)
-                        recv_buf_size = recv_buf.tell()
-                        #print('3.after fifo, recv_buf_pos : %s' % recv_buf.tell())
-                        #print ('3. after fifo, recv_buf_size: %s' % len(recv_buf.getvalue()))
-                    else:
-                        pass
-                        #print('accumulating files...')
-                except IOError:
-                    error_log.info("%s is ignored" % file_name) 
-            else:
-                error_log.info(file_name,' does not exist\n')
-                print (file_name + ' is not exist...............................................\n')
-    recv_buf.seek(0,0)
-    mpu_parts = upload_mpu(tar_name, mpu_id, recv_buf.read(), parts_index, parts)
-    parts_index += 1
-    mpu_parts = adjusting_parts_order(mpu_parts)
-    complete_mpu(tar_name, mpu_id, mpu_parts)
+            try:
+                tar.add(file_name, arcname=obj_name)
+                collected_files_no += 1
+                filelist_log.debug(file_name + delimeter + obj_name + delimeter + str(file_size)) #kyongki
+            except IOError:
+                error_log.info("%s is ignored" % file_name) 
+    recv_buf.seek(0)
+    success_log.info('%s uploading',tar_name)
+    s3_client.upload_fileobj(recv_buf, bucket_name, tar_name, ExtraArgs={'Metadata': {'snowball-auto-extract': 'true'}})
     ### print metadata
     meta_out = s3_client.head_object(Bucket=bucket_name, Key=tar_name)
-    print('metadata info: %s\n' % str(meta_out))
-    print('%s is uploaded successfully\n' % tar_name)
-    success_log.debug('metadata info: %s' % str(meta_out))
-    success_log.info('%s uploaded successfully' % tar_name)
+    success_log.info('meta info: %s ',str(meta_out))
+    success_log.info('%s is uploaded successfully\n' % tar_name)
+    #print('metadata info: %s\n' % str(meta_out))
+    #print('%s is uploaded successfully\n' % tar_name)
     return collected_files_no
 ## end of code from snowball_uploader
 
@@ -250,7 +192,7 @@ def upload_get_files(sub_prefix, q):
             try:
                 file_name = os.path.join(r,file)
                 # support compatibility of MAC and windows
-                file_name = unicodedata.normalize('NFC', file_name)
+                #file_name = unicodedata.normalize('NFC', file_name)
                 if os.name == 'nt':
                     obj_name = prefix_root + file_name.replace(sub_prefix,'',1).replace('\\', '/')
                 else:
@@ -325,10 +267,11 @@ def s3_booster_help():
 if __name__ == '__main__':
 
     # define simple queue
-    q = multiprocessing.Queue()
+    #q = multiprocessing.Queue()
+    q = multiprocessing.Manager().Queue()
     
-    #print("starting script...")
     start_time = datetime.now()
+    success_log.info("starting script..."+str(start_time))
     src_dir = prefix_list
     check_srcdir(src_dir)
 
