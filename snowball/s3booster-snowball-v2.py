@@ -109,7 +109,7 @@ s3_client = session.client('s3', endpoint_url=endpoint)
 
 # defining function
 ## setup logger
-def setup_logger(logger_name, log_file, level=logging.INFO):
+def setup_logger(logger_name, log_file, level=logging.INFO, sHandler=False):
     l = logging.getLogger(logger_name)
     formatter = logging.Formatter('%(message)s')
     fileHandler = logging.FileHandler(log_file, mode='a', encoding='utf-8')
@@ -118,12 +118,15 @@ def setup_logger(logger_name, log_file, level=logging.INFO):
     streamHandler.setFormatter(formatter)
     l.setLevel(level)
     l.addHandler(fileHandler)
-    l.addHandler(streamHandler)
+    if sHandler:
+        l.addHandler(streamHandler)
+    else:
+        pass
 
 ## define logger
-setup_logger('error', errorlog_file, level=log_level)
-setup_logger('success', successlog_file, level=log_level)
-setup_logger('filelist', filelist_file, level=log_level)
+setup_logger('error', errorlog_file, level=log_level, sHandler=True)
+setup_logger('success', successlog_file, level=log_level, sHandler=True)
+setup_logger('filelist', filelist_file, level=log_level, sHandler=False)
 error_log = logging.getLogger('error')
 success_log = logging.getLogger('success')
 filelist_log = logging.getLogger('filelist')
@@ -141,7 +144,7 @@ def copy_to_snowball(tar_name, org_files_list):
             try:
                 tar.add(file_name, arcname=obj_name)
                 collected_files_no += 1
-                filelist_log.debug(file_name + delimeter + obj_name + delimeter + str(file_size)) #kyongki
+                filelist_log.info(file_name + delimeter + obj_name + delimeter + str(file_size)) #kyongki
             except IOError:
                 error_log.info("%s is ignored" % file_name) 
     recv_buf.seek(0)
@@ -181,6 +184,17 @@ def finishq(q, p_list):
     for pi in p_list:
         pi.join()
 
+def conv_obj_name(file_name, prefix_root, sub_prefix):
+    if sub_prefix[-1] != '/':
+        sub_prefix = sub_prefix + '/'
+    if prefix_root[-1] != '/':
+        prefix_root = prefix_root + '/'
+    if os.name == 'nt':
+        obj_name = prefix_root + file_name.replace(sub_prefix,'',1).replace('\\', '/')        
+    else:
+        obj_name = prefix_root + file_name.replace(sub_prefix,'',1)
+    return obj_name
+
 # get files to upload
 def upload_get_files(sub_prefix, q):
     num_obj=0
@@ -193,10 +207,7 @@ def upload_get_files(sub_prefix, q):
                 file_name = os.path.join(r,file)
                 # support compatibility of MAC and windows
                 #file_name = unicodedata.normalize('NFC', file_name)
-                if os.name == 'nt':
-                    obj_name = prefix_root + file_name.replace(sub_prefix,'',1).replace('\\', '/')
-                else:
-                    obj_name = prefix_root + file_name.replace(sub_prefix,'',1)
+                obj_name = conv_obj_name(file_name, prefix_root, sub_prefix)
                 f_size = os.stat(file_name).st_size                
                 file_info = (file_name, obj_name, f_size)
                 org_files_list.append(file_info)
