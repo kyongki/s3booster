@@ -2,6 +2,9 @@
 '''
 ** Chaveat: not suitable for millions of files, it shows slow performance to get object list
 ChangeLogs
+- 2021.08.13
+  - add arguments
+  - adding conv_obj_name()
 - 2021.08.03:
   - support multiprocessing(spawn) 
   - fixing windows path delimeter (\)
@@ -34,31 +37,58 @@ from botocore.exceptions import ClientError
 import logging
 import time
 import unicodedata
+import argparse
+
+## treating arguments
+parser = argparse.ArgumentParser()
+parser.add_argument('--bucket_name', help='your bucket name e) your-bucket', action='store', required=True)
+parser.add_argument('--src_dir', help='source directory e) /data/dir1/', action='store', required=True)
+#parser.add_argument('--region', help='aws_region e) ap-northeast-2', action='store')
+parser.add_argument('--endpoint', help='snowball endpoint e) http://10.10.10.10:8080 or https://s3.ap-northeast-2.amazonaws.com', action='store', default='https://s3.ap-northeast-2.amazonaws.com', required=True)
+parser.add_argument('--profile_name', help='aws_profile_name e) sbe1', action='store', default='default')
+parser.add_argument('--prefix_root', help='prefix root e) dir1/', action='store', default='')
+parser.add_argument('--max_process', help='NUM e) 256', action='store', default=256, type=int)
+args = parser.parse_args()
+
+prefix_list = args.src_dir  ## Don't forget to add last slash '/'
+prefix_root = args.prefix_root ## Don't forget to add last slash '/'
+##Common Variables
+bucket_name = args.bucket_name
+profile_name = args.profile_name
+endpoint = args.endpoint
+max_process = args.max_process
+log_level = logging.INFO ## DEBUG, INFO, WARNING, ERROR
 
 #region = 'us-east-2' ## change it with your region
-prefix_list = ['/data/']  ## Don't forget to add last slash '/'
-##Common Variables
-region = 'ap-northeast-2' ## change it with your region
-bucket_name = 'your-own-bucket'
-max_process = 256
-endpoint='https://s3.'+region+'.amazonaws.com'
-log_level = logging.INFO ## DEBUG, INFO, WARNING, ERROR
+#prefix_list = ['/data/']  ## Don't forget to add last slash '/'
+###Common Variables
+#region = 'ap-northeast-2' ## change it with your region
+#bucket_name = 'your-own-bucket'
+#max_process = 256
+#endpoint='https://s3.'+region+'.amazonaws.com'
+#log_level = logging.INFO ## DEBUG, INFO, WARNING, ERROR
+
+## End of user variable
 # CMD variables
 cmd='upload_dir' ## supported_cmd: 'download|del_obj_version|restore_obj_version'
-# end of variables ## you don't need to modify below codes.
-
-errorlog_file = 'error.log'
-successlog_file = 'success.log'
+current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+# create log directory
+try:
+    os.makedirs('log')
+except: pass
+errorlog_file = 'log/error-%s.log' % current_time
+successlog_file = 'log/success-%s.log' % current_time
+filelist_file = 'log/filelist-%s.log' % current_time
 quit_flag = 'DONE'
 if os.name == 'posix':
     multiprocessing.set_start_method("fork")
 
 # S3 session
 #s3_client = boto3.client('s3')
-s3 = boto3.resource('s3',endpoint_url=endpoint, region_name=region)
+s3 = boto3.resource('s3',endpoint_url=endpoint)
 bucket = s3.Bucket(bucket_name)
 # setup logger
-def setup_logger(logger_name, log_file, level=logging.INFO):
+def setup_logger(logger_name, log_file, level=logging.INFO, sHandler=False):
     l = logging.getLogger(logger_name)
     formatter = logging.Formatter('%(message)s')
     fileHandler = logging.FileHandler(log_file, mode='w', encoding='utf-8')
@@ -67,12 +97,18 @@ def setup_logger(logger_name, log_file, level=logging.INFO):
     streamHandler.setFormatter(formatter)
     l.setLevel(level)
     l.addHandler(fileHandler)
-    l.addHandler(streamHandler)
+    if sHandler:
+        l.addHandler(streamHandler)
+    else:
+        pass
 ## define logger
-setup_logger('error', errorlog_file, level=log_level)
-setup_logger('success', successlog_file, level=log_level)
-error_l = logging.getLogger('error')
-success_l = logging.getLogger('success')
+setup_logger('error', errorlog_file, level=log_level, sHandler=True)
+setup_logger('success', successlog_file, level=log_level, sHandler=True)
+setup_logger('filelist', filelist_file, level=log_level, sHandler=False)
+error_log = logging.getLogger('error')
+success_log = logging.getLogger('success')
+filelist_log = logging.getLogger('filelist')
+
 # execute multiprocessing
 def run_multip(max_process, exec_func, q):
     p_list = []
@@ -88,6 +124,17 @@ def finishq(q, p_list):
         q.put(quit_flag)
     for pi in p_list:
         pi.join()
+# convert object name
+def conv_obj_name(file_name, prefix_root, sub_prefix):
+    if sub_prefix[-1] != '/':
+        sub_prefix = sub_prefix + '/'
+    if prefix_root[-1] != '/':
+        prefix_root = prefix_root + '/'
+    if os.name == 'nt':
+        obj_name = prefix_root + file_name.replace(sub_prefix,'',1).replace('\\', '/')
+    else:
+        obj_name = prefix_root + file_name.replace(sub_prefix,'',1)
+    return obj_name
 
 # get files to upload
 def upload_get_files(sub_prefix, q):
@@ -97,21 +144,18 @@ def upload_get_files(sub_prefix, q):
         for file in f:
             file_name = os.path.join(r,file)
             # support compatibility of MAC and windows
-            file_name = unicodedata.normalize('NFC', file_name)
-            if os.name == 'nt':
-                obj_name = file_name.replace(sub_prefix,'',1).replace('\\', '/')
-            else:
-                obj_name = file_name.replace(sub_prefix,'',1)
+            #file_name = unicodedata.normalize('NFC', file_name)
+            obj_name = conv_obj_name(file_name, prefix_root, sub_prefix)
             mp_data = tuple([file_name, obj_name])
-            success_l.debug('get_file mp_data: %s', mp_data)
+            success_log.debug('get_file mp_data: %s', mp_data)
             try:
                 q.put(mp_data)
             except ClientError as e:
-                error_l.info('client error: putting %s into queue %s is failed' % file_name)
-                error_l.info(e)
+                error_log.info('client error: putting %s into queue %s is failed' % file_name)
+                error_log.info(e)
             except Exception as e:
-                error_l.info('exception error: putting %s into queue %s is failed' % file_name)
-                error_l.info(e)
+                error_log.info('exception error: putting %s into queue %s is failed' % file_name)
+                error_log.info(e)
             num_obj+=1
             #time.sleep(0.1)
     #q.close()
@@ -127,46 +171,51 @@ def upload_file(q):
         obj_name = mp_data[1] # object name in S3
         try:
             response = bucket.upload_file(file_name, obj_name)
-            success_l.info('%s is uploaded' % file_name)
+            success_log.info('%s is uploaded' % file_name)
+            filelist_log.info('%s , %s' % (file_name, obj_name))
         except ClientError as e:
-            error_l.info('client error: %s is failed, obj name: %s' % (file_name, obj_name))
-            error_l.info(e)
+            error_log.info('client error: %s is failed, obj name: %s' % (file_name, obj_name))
+            error_log.info(e)
         except Exception as e:
-            error_l.info('exception error: %s is failed, obj name: %s' % (file_name, obj_name))
-            error_l.info(e)
+            error_log.info('exception error: %s is failed, obj name: %s' % (file_name, obj_name))
+            error_log.info(e)
         #return 0 ## for the dubug, it will pause with error
-def upload_file_multi(s3_dirs):
+def upload_file_multi(src_dir):
     q = multiprocessing.Queue()
-    total_obj = 0
-    for s3_dir in s3_dirs:
-        success_l.info('%s directory is uploading' % s3_dir)
-        p_list = run_multip(max_process, upload_file, q)
-        # get object list and ingest to processes
-        num_obj = upload_get_files(s3_dir, q)
-        # sending quit_flag and join processes
-        finishq(q, p_list)
-        success_l.info('%s directory is uploaded' % s3_dir)
-        total_obj += num_obj
-    return total_obj
+    success_log.info('%s directory is uploading' % src_dir)
+    p_list = run_multip(max_process, upload_file, q)
+    # get object list and ingest to processes
+    num_obj = upload_get_files(src_dir, q)
+    # sending quit_flag and join processes
+    finishq(q, p_list)
+    success_log.info('%s directory is uploaded' % src_dir)
+    return num_obj
 
 def s3_booster_help():
     print("example: python3 s3booster_upload.py")
+
+# check source directory exist
+def check_srcdir(src_dir):
+    if not os.path.isdir(src_dir):
+        raise IOError("source directory not found: " + src_dir)
+
 # start main function
 if __name__ == '__main__':
     #print("starting script...")
     start_time = datetime.now()
-    s3_dirs = prefix_list
+    src_dir = prefix_list
+    check_srcdir(src_dir)
     if cmd == 'upload_dir':
-        total_files = upload_file_multi(s3_dirs)
+        total_files = upload_file_multi(src_dir)
     else:
         s3_booster_help
 
     end_time = datetime.now()
-    success_l.info('====================================')
+    success_log.info('====================================')
     #for d in down_dir:
     #    stored_dir = local_dir + d
     #    print("[Information] Download completed, data stored in %s" % stored_dir)
-    success_l.info('Duration: {}'.format(end_time - start_time))
-    success_l.info('Total File numbers: %d' % total_files)
-    success_l.info('S3 Endpoint: %s' % endpoint)
-    success_l.info('End')
+    success_log.info('Duration: {}'.format(end_time - start_time))
+    success_log.info('Total File numbers: %d' % total_files)
+    success_log.info('S3 Endpoint: %s' % endpoint)
+    success_log.info('End')
