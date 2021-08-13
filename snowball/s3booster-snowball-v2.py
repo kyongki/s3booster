@@ -88,7 +88,7 @@ min_part_size = 5 * 1024 ** 2 # 16MiB for S3, 5MiB for SnowballEdge
 max_part_count = int(math.ceil(max_tarfile_size / max_part_size))
 current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
 # CMD variables
-cmd='upload_dir' ## supported_cmd: 'download|del_obj_version|restore_obj_version'
+cmd='upload_sbe' ## supported_cmd: 'download|del_obj_version|restore_obj_version'
 # create log directory
 try:
     os.makedirs('log')
@@ -286,7 +286,7 @@ if __name__ == '__main__':
     src_dir = prefix_list
     check_srcdir(src_dir)
 
-    if cmd == 'upload_dir':
+    if cmd == 'upload_sbe':
         total_files = upload_file_multi(src_dir)
     else:
         s3_booster_help
