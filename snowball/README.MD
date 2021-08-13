@@ -1,6 +1,12 @@
 # s3booster snowball
 s3booster-snowball.py, this script implemented batch feature in parallel so it is fast and simple to use, especially when dealing with small files. If you have headache with low performance when uploading small files, it may give you StimPack!
 
+## v1 or v2?
+s3booster-snowball has two types of version 
+  - version 1: suitable for low memory workstation, but little slower comparing to version 2
+  - version 2: using more memory, it shows faster upload performance.
+    - workstation memory requirement: 32GB preferred 
+        - free memory > (max-tarfile-size * max-process) + 0.2 * (max-tarfile-size * max-process)
 ## How to Use
 Here is example to execute s3booster-snowball.py
 ```sh
